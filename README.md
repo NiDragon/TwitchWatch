@@ -1,2 +1,1 @@
-# TwitchWatcher
-Bot created for discord to show how many streamers are streaming a game with viewer count in real time.
+Just a very crude simple discord bot.
