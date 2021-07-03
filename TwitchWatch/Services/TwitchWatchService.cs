@@ -329,7 +329,7 @@ namespace TwitchWatch.Services
                             }
                             catch (Exception removeMessageException)
                             {
-                                Console.WriteLine($"Failed to remove offline stream reason: {removeMessageException}");
+                                Console.WriteLine($"Failed to remove offline stream reason: {removeMessageException.Message}");
                             }
                         }
                         else
