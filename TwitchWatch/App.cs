@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +10,7 @@ using Discord.Commands;
 using TwitchWatch.Services;
 using System.Collections.Concurrent;
 using System.Reflection;
+using Microsoft.Extensions.Configuration;
 
 namespace TwitchWatch
 {
@@ -24,58 +24,18 @@ namespace TwitchWatch
     // - https://github.com/foxbot/patek - a more feature-filled bot, utilizing more aspects of the library
     class App
     {
-        private static char[] trimChars = { ' ' };
-        private static ConcurrentDictionary<string, string> m_config;
+        private static IConfiguration configuration;
 
         /// <summary>
         /// Quick dirty config loader
         /// </summary>
         /// <returns></returns>
-        public static bool LoadConfig()
-        {
-           App.m_config = new ConcurrentDictionary<string, string>();
-
-            if (!File.Exists("./App.conf"))
-                return false;
-
-            using (TextReader tr = new StreamReader(File.Open("./App.conf", FileMode.Open)))
-            {
-                string raw = "";
-
-                while ((raw = tr.ReadLine()) != null)
-                {
-                    // find any comment characters
-                    int found = raw.IndexOf(';');
-
-                    int comment = (found != -1) ? found : raw.Length;
-
-                    string[] line = raw.Substring(0, comment).Split("=", StringSplitOptions.RemoveEmptyEntries);
-
-                    if (line.Length > 1)
-                    {
-                        App.m_config.GetOrAdd(line[0].Trim(trimChars), line[1].Trim(trimChars));
-                    }
-                }
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Get Accessor
-        /// </summary>
-        /// <param name="key"></param>
-        /// <returns></returns>
-        public static string GetConfigValue(string key)
-        {
-            if(m_config.ContainsKey(key))
-            {
-                return m_config[key];
-            }
-            else
-            {
-                throw new Exception($"Missing or incorrect config key: {key}");
-            }
+        private static void LoadConfig()
+        { 
+            configuration= new ConfigurationBuilder()
+                .AddJsonFile("config.json")
+                .AddUserSecrets<App>()
+                .AddEnvironmentVariables().Build();
         }
 
         // There is no need to implement IDisposable like before as we are
@@ -83,20 +43,28 @@ namespace TwitchWatch
         static void Main(string[] args)
         {
             Console.Title = $"{Assembly.GetCallingAssembly().GetName().Name} - Version: {Assembly.GetCallingAssembly().GetName().Version.ToString()}";
-
-            Console.BackgroundColor = ConsoleColor.DarkBlue;
-            Console.Clear();
-            Console.ForegroundColor = ConsoleColor.Gray;
-
-            if (!LoadConfig())
+            LoadConfig();
+            if (args.Length > 0 && args[0] == "dumpconfig")
+            {
+                DumpConfig();
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(configuration["Discord:Token"]))
             {
                 Console.WriteLine("Failed to load config file: \"App.conf\"");
-
-                while (true)
-                    Thread.Sleep(10);
+                Environment.ExitCode = 1; // Non 0 signifies an error.
+                return;
             }
 
             new App().MainAsync().GetAwaiter().GetResult();
+        }
+
+        private static void DumpConfig()
+        {
+            foreach (var configValue in configuration.AsEnumerable())
+            {
+                Console.WriteLine($"{configValue.Key}={configValue.Value}");
+            }
         }
 
         public async Task MainAsync()
@@ -114,7 +82,7 @@ namespace TwitchWatch
 
                 // Tokens should be considered secret data and never hard-coded.
                 // We can read from the environment variable to avoid hardcoding.
-                await client.LoginAsync(TokenType.Bot, App.GetConfigValue("Token"));
+                await client.LoginAsync(TokenType.Bot, configuration["Discord:Token"]);
                 await client.StartAsync();
 
                 // Here we initialize the logic required to register our commands.
@@ -134,6 +102,7 @@ namespace TwitchWatch
         private ServiceProvider ConfigureServices()
         {
             return new ServiceCollection()
+                .AddSingleton(configuration)
                 .AddSingleton<DiscordSocketClient>()
                 .AddSingleton<CommandService>()
                 .AddSingleton<CommandHandlingService>()

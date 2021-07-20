@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
+using Microsoft.Extensions.Configuration;
 
 namespace TwitchWatch.Services
 {
@@ -13,20 +14,23 @@ namespace TwitchWatch.Services
         private readonly CommandService _commands;
         private readonly DiscordSocketClient _discord;
         private readonly IServiceProvider _services;
+        private readonly IConfiguration _configuration;
 
         private char Prefix = '!';
         private ulong ListenChannel = 0;
 
         public CommandHandlingService(IServiceProvider services)
         {
-            // Get the command prefix handler service listen channel
-            Prefix = App.GetConfigValue("Prefix")[0];
-            ListenChannel = ulong.Parse(App.GetConfigValue("ListenChannel"));
-
+            
             _commands = services.GetRequiredService<CommandService>();
             _discord = services.GetRequiredService<DiscordSocketClient>();
+            _configuration = services.GetRequiredService<IConfiguration>();
             _services = services;
 
+            // Get the command prefix handler service listen channel
+            Prefix = _configuration["prefix"][0];
+            ListenChannel = ulong.Parse(_configuration["ListenChannel"]);
+            
             // Hook CommandExecuted to handle post-command-execution logic.
             _commands.CommandExecuted += CommandExecutedAsync;
             // Hook MessageReceived so we can process each message to see
@@ -54,7 +58,7 @@ namespace TwitchWatch.Services
             // Perform prefix check. You may want to replace this with
             // (!message.HasCharPrefix('!', ref argPos))
             // for a more traditional command format like !help.
-            if (!message.HasCharPrefix(App.GetConfigValue("Prefix")[0], ref argPos)) return;
+            if (!message.HasCharPrefix(Prefix, ref argPos)) return;
 
             var context = new SocketCommandContext(_discord, message);
             // Perform the execution of the command. In this method,
