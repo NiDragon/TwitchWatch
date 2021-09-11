@@ -61,7 +61,9 @@ namespace TwitchWatch.Services
         private List<Stream> m_activeStreams;
         private Dictionary<string, ulong> m_messageMap;
 
-        // Default to 60 seconds
+        /// <summary>
+        /// Default to 60 seconds
+        /// </summary>
         private TimeSpan UpdateInterval = TimeSpan.FromSeconds(60);
         private ulong EchoChannel = 0;
 
@@ -73,6 +75,11 @@ namespace TwitchWatch.Services
         }
         private bool _Started = false;
         private bool RunOnStart = false;
+
+        /// <summary>
+        /// On any request that might flood the server we request that this fails and throws an exception where acceptable.
+        /// </summary>
+        private static readonly RequestOptions RequestFailure = new RequestOptions { RetryMode = RetryMode.AlwaysFail };
 
         public TwitchWatchService(DiscordSocketClient client, HttpClient http)
         {
@@ -99,14 +106,53 @@ namespace TwitchWatch.Services
 
             RunOnStart = bool.Parse(App.GetConfigValue("RunOnStart"));
 
+            // Handle a disconnect kill the logic loop wait for exit
+            _client.Disconnected += (evt) =>
+            {
+                Console.WriteLine("Connection To Discord Lost Shutting Down.");
+                Console.WriteLine($"Reason: {evt.Message}");
+
+                _Started = false;
+
+                while (_IsRunning)
+                    Thread.Sleep(10);
+
+                // Try to reconnect if this was started manually otherwise Ready will do it for us
+                if (!RunOnStart)
+                {
+                    DateTime reconTime = DateTime.Now;
+
+                    while (_client.ConnectionState != ConnectionState.Connected)
+                    { 
+                        Thread.Sleep(10);
+
+                        if(DateTime.Now - reconTime >= TimeSpan.FromSeconds(30))
+                        {
+                            Console.WriteLine("Failed To Restart Timeout Reached!");
+                            break;
+                        }
+                    }
+
+                    if (_client.ConnectionState == ConnectionState.Connected)
+                        Start();
+                }
+
+                return Task.CompletedTask;
+            };
+
+            // Only if RunOnStart is set true in the config
             if (RunOnStart)
             {
                 _client.Ready += () =>
                 {
+                    while (_IsRunning)
+                        Thread.Sleep(10);
+
                     ResetWatchService();
 
                     _Started = true;
 
+                    // Start a new task for the loop keep a reference to this?
                     Task.Factory.StartNew(
                     new Action(() =>
                     {
@@ -121,7 +167,7 @@ namespace TwitchWatch.Services
         #region Tasks
 
         /// <summary>
-        /// Clear the watch list at startup
+        /// Start a new task and clear the old data if any exists
         /// </summary>
         public async void Start()
         {
@@ -136,6 +182,9 @@ namespace TwitchWatch.Services
             }));
         }
 
+        /// <summary>
+        /// Await the stopping of any existing work
+        /// </summary>
         public async void Stop()
         {
             _Started = false;
@@ -147,6 +196,11 @@ namespace TwitchWatch.Services
             });
         }
 
+        /// <summary>
+        /// This clears the twitch watch service data
+        ///
+        /// if this fails just throw an error and stop
+        /// </summary>
         private async void ResetWatchService()
         {
             m_activeStreams = new List<Stream>();
@@ -160,9 +214,22 @@ namespace TwitchWatch.Services
             SocketTextChannel output = socket as SocketTextChannel;
 
             var messages = await Discord.AsyncEnumerableExtensions.FlattenAsync(output.GetMessagesAsync(100));
-            await output.DeleteMessagesAsync(messages.Where(p => p.IsPinned.Equals(false)));
+
+            try
+            {
+                await output.DeleteMessagesAsync(messages.Where(p => p.IsPinned.Equals(false)), RequestFailure);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Attempt to reset TwitchWatch service encountered an error and thrown an exception.");
+                Console.WriteLine($"Reason: {e.Message}");
+            }
         }
 
+        /// <summary>
+        /// Announce a new stream throw an exception if this fails
+        /// </summary>
+        /// <param name="strm"></param>
         private async void Announce(Stream strm)
         {
             var socket = _client.GetChannel(EchoChannel);
@@ -190,7 +257,7 @@ namespace TwitchWatch.Services
             // Store Announcement
             try
             {
-                Discord.Rest.RestUserMessage Rum = (await output.SendMessageAsync("", false, builder.Build()));
+                Discord.Rest.RestUserMessage Rum = (await output.SendMessageAsync("", false, builder.Build(), RequestFailure));
 
                 if (Rum == null)
                 {
@@ -200,9 +267,10 @@ namespace TwitchWatch.Services
 
                 m_messageMap.Add(strm.id.ToString(), Rum.Id);
             }
-            catch (Exception)
+            catch (Exception e)
             {
                 Console.WriteLine("Failed To Send Announce Message!");
+                Console.WriteLine($"Reason: {e.Message}");
             }
         }
 
@@ -222,6 +290,7 @@ namespace TwitchWatch.Services
 
             HttpResponseMessage response = null;
 
+            // Setup Twitch Api Access
             using (var request = new HttpRequestMessage(new HttpMethod("POST"), $"https://id.twitch.tv/oauth2/token?client_id={ClientID}&client_secret={Secret}&grant_type=client_credentials"))
             {
                 try
@@ -245,8 +314,10 @@ namespace TwitchWatch.Services
                 }
             }
 
+            // Begin Update Loop
             while (_Started)
             {
+                // Check if we have a valid text channel
                 var socket = _client.GetChannel(EchoChannel);
 
                 if (socket == null)
@@ -260,13 +331,16 @@ namespace TwitchWatch.Services
 
                 bool BadData = false;
 
+                // Should we update if this is initial yes or if we passed the update interval
                 if (lastUpdate.Elapsed >= UpdateInterval || init)
                 {
                     // List of streams returned from Twitch API
                     List<Stream> strms = new List<Stream>();
 
+                    // Loop over all games in the game list this should not be hard coded?
                     for (int i = 0; i < _games.Count(); i++)
                     {
+                        // Collect a twitch response
                         using (var request = new HttpRequestMessage(new HttpMethod("GET"), $"https://api.twitch.tv/helix/streams?game_id={_games[i]}"))
                         {
                             try
@@ -288,6 +362,7 @@ namespace TwitchWatch.Services
                         }
                     }
 
+                    // If the stream data was invalid dont do anything and wait till next time
                     if (BadData)
                     {
                         lastUpdate.Restart();
@@ -295,7 +370,7 @@ namespace TwitchWatch.Services
                         continue;
                     }
 
-                    // Add new streams
+                    // Add new streams (Should we wait between new posts?)
                     foreach (Stream activeStream in strms)
                     {
                         if (m_activeStreams.FindIndex(p => p.id.ToString() == activeStream.id.ToString()) == -1)
@@ -318,6 +393,10 @@ namespace TwitchWatch.Services
                         {
                             try
                             {
+                                // This section has some considerations to make...
+                                // In the event DeleteMessageAsync throws an exception and fails
+                                // we may be stuck with a orphaned message in the message map.
+
                                 // Remove from active streams
                                 m_activeStreams.RemoveAt(i);
 
@@ -350,7 +429,7 @@ namespace TwitchWatch.Services
                                     builder.WithUrl($"https://twitch.tv/{currentStream.user_name}");
                                     builder.WithColor(Color.Purple);
 
-                                    await output.ModifyMessageAsync(m_messageMap[currentStream.id], m => { m.Embed = builder.Build(); });
+                                    await output.ModifyMessageAsync(m_messageMap[currentStream.id], m => { m.Embed = builder.Build(); }, RequestFailure);
                                 }
                             }
                             catch (Exception updateMessageFail)
