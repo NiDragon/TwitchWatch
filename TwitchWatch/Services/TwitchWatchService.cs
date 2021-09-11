@@ -17,7 +17,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace TwitchWatch.Services
 {
-    public class TwitchWatchService
+    public partial class TwitchWatchService
     {
         private readonly DiscordSocketClient _client;
         private readonly HttpClient _http;
@@ -40,13 +40,13 @@ namespace TwitchWatch.Services
         private bool _Started = false;
         private bool RunOnStart = false;
 
-        public TwitchWatchService(DiscordSocketClient client, HttpClient http,IConfiguration configuration)//TODO: Possibly move to IHostedService for easier docker monitoring
+        //TODO: Possibly move to IHostedService for easier docker monitoring
         /// <summary>
         /// On any request that might flood the server we request that this fails and throws an exception where acceptable.
         /// </summary>
         private static readonly RequestOptions RequestFailure = new RequestOptions { RetryMode = RetryMode.AlwaysFail };
 
-        public TwitchWatchService(DiscordSocketClient client, HttpClient http)
+        public TwitchWatchService(DiscordSocketClient client, HttpClient http,IConfiguration configuration)
         {
             _client = client;
             _http = http;
