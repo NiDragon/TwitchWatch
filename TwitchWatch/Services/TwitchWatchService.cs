@@ -13,51 +13,15 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 
 namespace TwitchWatch.Services
 {
-    public class TwitchWatchService
+    public partial class TwitchWatchService
     {
-        public class Stream
-        {
-            public string id { get; set; }
-            public string user_id { get; set; }
-            public string user_login { get; set; }
-            public string user_name { get; set; }
-            public string game_id { get; set; }
-            public string game_name { get; set; }
-            public string type { get; set; }
-            public string title { get; set; }
-            public int viewer_count { get; set; }
-            public DateTime started_at { get; set; }
-            public string language { get; set; }
-            public string thumbnail_url { get; set; }
-            public List<string> tag_ids { get; set; }
-            public bool is_mature { get; set; }
-        }
-
-        public class Pagination
-        {
-            public string cursor { get; set; }
-        }
-
-        public class StreamsRequest
-        {
-            public List<Stream> data { get; set; }
-            public Pagination pagination { get; set; }
-        }
-
-        public class OAuth2Request
-        {
-            public string access_token { get; set; }
-            public string refresh_token { get; set; }
-            public object expires_in { get; set; }
-            public List<string> scope { get; set; }
-            public string token_type { get; set; }
-        }
-
         private readonly DiscordSocketClient _client;
         private readonly HttpClient _http;
+        private readonly IConfiguration _configuration;
         private List<Stream> m_activeStreams;
         private Dictionary<string, ulong> m_messageMap;
 
@@ -76,22 +40,24 @@ namespace TwitchWatch.Services
         private bool _Started = false;
         private bool RunOnStart = false;
 
+        //TODO: Possibly move to IHostedService for easier docker monitoring
         /// <summary>
         /// On any request that might flood the server we request that this fails and throws an exception where acceptable.
         /// </summary>
         private static readonly RequestOptions RequestFailure = new RequestOptions { RetryMode = RetryMode.AlwaysFail };
 
-        public TwitchWatchService(DiscordSocketClient client, HttpClient http)
+        public TwitchWatchService(DiscordSocketClient client, HttpClient http,IConfiguration configuration)
         {
             _client = client;
             _http = http;
+            _configuration = configuration;
 
             m_activeStreams = new List<Stream>();
             m_messageMap = new Dictionary<string, ulong>();
 
-            EchoChannel = ulong.Parse(App.GetConfigValue("EchoChannel"));
+            EchoChannel = ulong.Parse(_configuration["EchoChannel"]);
 
-            string intv = App.GetConfigValue("UpdateInterval");
+            string intv = _configuration["UpdateInterval"];
 
             if (intv != string.Empty)
             {
@@ -104,7 +70,7 @@ namespace TwitchWatch.Services
                 }
             }
 
-            RunOnStart = bool.Parse(App.GetConfigValue("RunOnStart"));
+            RunOnStart = bool.Parse(_configuration["RunOnStart"]);
 
             // Handle a disconnect kill the logic loop wait for exit
             _client.Disconnected += (evt) =>
@@ -285,8 +251,8 @@ namespace TwitchWatch.Services
 
             string AuthToken = string.Empty;
 
-            string ClientID = App.GetConfigValue("ClientID");
-            string Secret = App.GetConfigValue("ClientSecret");
+            string ClientID = _configuration["Twitch:ClientID"];
+            string Secret = _configuration["Twitch:ClientSecret"];
 
             HttpResponseMessage response = null;
 

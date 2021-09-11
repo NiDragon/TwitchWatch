@@ -1,0 +1,13 @@
+{
+  "Discord":{
+    "Token": ""
+  },
+  "Twitch": {
+    "ClientID": "",
+    "ClientSecret": ""
+  },
+  "Prefix": "",
+  "ListenChannel":"",
+  "EchoChannel": "",
+  "RunOnStart": ""
+}
